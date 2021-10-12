@@ -1,66 +1,113 @@
-# 2010 Census Data
+# Thanks to John Johnson for sharing his code and
+# crosswalk data that makes this analysis possible.
 
-Sys.setenv(CENSUS_KEY = Sys.getenv("CENSUS_API_KEY"))
-
-apis <- listCensusApis()
-
-meta_2010 <- listCensusMetadata(name = "dec/pl", vintage = 2010)
-
-# Variables for 2010 aren't the same as 2020
-
-vars_2010 <- c(Total = "P001001",
-               `Total 18+` = "P003001",
-               White = "P001003",
-               `White 18+` = "P003003",
-               Black = "P001004",
-               `Black 18+` = "P003004",
-               Asian = "P001006",
-               `Asian 18+` = "P003006",
-               Hispanic = "P002002",
-               `Hispanic 18+` = "P004002")
-
-mke_pl_2010 <- getCensus(name = "dec/pl",
-          vintage = 2010,
-          region = "voting district:*", # Milwaukee FIPS
-          regionin = "state:55+county:079", # WI FIPS
-          vars = c("NAME", vars_2010)) %>%
-  filter(str_detect(NAME, "^Milwaukee - C")) %>%
-  mutate(ward = str_extract(NAME, "(?<=- C )\\d*")) %>%
-  pivot_longer(cols = -c(1:5, ward), names_to = "variable", values_to = "value") %>%
-  mutate(variable = if_else(variable %in% vars_2010, names(vars_2010)[match(variable, vars_2010)], "ERROR"))
+library(tidyverse)
+library(tidycensus)
 
 
-clean_2010 <- mke_pl_2010 %>%
-  select(ward,
-         variable,
-         "value_2010" = value)
+# handy reference table to look up variable names
+census_vars_2010 <- load_variables(2010, "sf1", T)
 
-both_decs <- left_join(v_wards, clean_2010)
+# race variables 
 
-both_decs %>%
-  filter(str_detect(variable, "Black")) %>%
-  mutate(change = value - value_2010,
-         c = case_when(change < -200 ~ "Less Than -200",
-                       change < -149 ~ "-150 to -200",
-                       change < -99 ~ "-100 to -150",
-                       change < -49 ~ "-50 to -100")) %>%
-  ggplot() +
-  geom_sf(aes(fill = value), size = .01, color = "white") +
-  facet_wrap(~ variable) + 
-  theme_void() +
-  scale_fill_steps2()
+race_filters <- c("White",
+                  "Black",
+                  "Asian")
 
-both_decs %>%
-  as_tibble() %>%
-  filter(variable == "Total") %>%
-  mutate(ward = as.numeric(ward)) %>%
-  group_by(ward) %>%
-  summarise(total = sum(value),
-            total_2010 = sum(value_2010)) %>%
+races_18_plus <- map(race_filters, function(x) {
+  t <- census_vars_2010 %>%
+    filter(str_detect(name, "^P010") & str_detect(label, x)) %>%
+    .[[1]]
+}) %>%
+  set_names(., race_filters)
+
+any_race <-  map_df(race_filters, function(x) {
+  census_vars_2010 %>%
+    filter(str_detect(name, "^P010") & str_detect(label, x))%>%
+    mutate(race = paste0(x, " 18+")) %>%
+    select(name, race)
+}) %>%
+  bind_rows(
+    tibble(
+      race = c("Total",
+               "Total 18+",
+               "White",
+               "Black",
+               "Asian",
+               "Hispanic",
+               "Hispanic 18+"),
+      name = c("P005001",
+               "P010001",
+               "P006002",
+               "P006003",
+               "P006005",
+               "P007009",
+               "P011002")
+    )
+  )
+
+
+races <- c(Total = "P005001",
+           `Total 18+` = "P010001",
+           # Total Races Tallied
+           White = "P006002",
+           Black = "P006003",
+           Asian = "P006005",
+           Hispanic = "P007009",
+           `Hispanic 18+` = "P011002",
+           # 18+ Doesn't have same Total Races Tallied
+           # need to pull each variable
+           races_18_plus$White,
+           races_18_plus$Black,
+           races_18_plus$Asian) %>%
+  unique
+
+races <- c("Total",
+           "Hispanic",
+            "White",
+            "Black",
+            "American Indian",
+            "Asian",
+            "Native Hawaiian",
+            "Other",
+            "Two or More")
+
+dem_vars_2010 <- tibble(
+  variable = c("P009001",
+               "P009002",
+               sprintf("P00900%i", 5:9),
+               sprintf("P0090%i", 10:11),
+               "P011001",
+               "P011002",
+               sprintf("P01100%i", 5:9),
+               sprintf("P0110%i", 10:11)),
+  race = c(races,
+           paste0(races, " 18+"))
+)
+
+
+# this is just the total population of the block
+block_pop_2010 <- get_decennial("block", variable = dem_vars_2010[["variable"]], state = "WI", county = "079", year = 2010)
+
+bp_2010 <- left_join(block_pop_2010, dem_vars_2010, by = "variable")
+
+# change the path as needed
+block_to_ward_2010 <- read_rds("data/BlocksToWards_CombinedMethod.rds") %>%
   ungroup() %>%
-  summarise(total = sum(total),
-            total_2010 = sum(total_2010, na.rm = TRUE))
+  mutate(ward = str_pad(ward, 4, "left", "0"))
 
-mke_pl_2010 %>%
-  filter(variable == "Total") %>%
-  summarise(total = sum(value))
+# join with the crosswalk, multiply pop by the allocation factor, and summarize
+ward_pop_2010 <- bp_2010 %>%
+  select(block = GEOID, value, variable, race) %>%
+  group_by(block, race) %>%
+  summarise(pop = sum(value)) %>%
+  ungroup() %>%
+  inner_join(., block_to_ward_2010) %>%
+  mutate(adj_pop = pop * prop_of_block) %>%
+  group_by(ward, race) %>%
+  summarise(pop = sum(adj_pop)) %>%
+  ungroup() %>%
+  mutate(year = 2010)
+
+saveRDS(ward_pop_2010, "data/ward_pop_2010.rds")
+

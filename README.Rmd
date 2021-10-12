@@ -1,34 +1,59 @@
 ---
 title: "README"
-output: 
-  github_document:
-    keep_md: false
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, clean=TRUE)
+library(tidyverse)
+library(cityforwardcollective)
+library(sf)
+library(RColorBrewer)
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = 'center', dev = 'svg')
+
+ward_pop_comparison <- readRDS("data/ward_pop_comparison.rds")
+
+sbd <- st_read("../Shapefiles/Milwaukee/MPSSchoolBoardDistricts/MPS_School_Board_Districts.shp")
+
+
 ```
 
-## GitHub Documents
+The purpose of this repository is to provide summary analysis of the 2020 Census counts.
 
-This is an R Markdown format used for publishing markdown documents to GitHub. When you click the **Knit** button all R code chunks are run and a markdown file (.md) suitable for publishing to GitHub is generated.
+## Citywide
 
-## Including Code
+### Wards
 
-You can include R code in the document as follows:
+```{r citwide_ward_pop_change_w_sbd, out.width="100%"}
+citywide <- ward_pop_comparison %>%
+  as_tibble() %>%
+  group_by(race) %>%
+  summarise(total_2020 = sum(pop_2020),
+            total_2010 = sum(pop_2010),
+            change = sum(change),
+            percent_change = sum(change) / sum(pop_2010)) %>%
+  ungroup() %>%
+  mutate(percent_of_total_2020 = total_2020 / 577222)
 
-```{r cars}
-knitr::opts_chunk$set(echo = TRUE, clean=TRUE)
-summary(cars)
+ward_pop_comparison %>%
+  filter(str_detect(race, "Total")) %>%
+  mutate(race = ifelse(race == "Total", "Total Population", "18+ Population")) %>%
+  ggplot(aes(fill = change_group)) +
+  geom_sf(color = "white") +
+  geom_sf(data = sbd, color = "black", inherit.aes = FALSE, fill = NA,
+          size = 1) +
+  geom_sf_text(aes(label = SCHOOL), data = sbd %>% filter(SCHOOL != 7), inherit.aes = FALSE,
+               size = 5) +
+  geom_sf_text(aes(label = SCHOOL), data = sbd %>% filter(SCHOOL == 7), inherit.aes = FALSE,
+               size = 5, nudge_y = -5000) +
+  scale_fill_brewer(palette = "PRGn", direction = -1) +
+  theme_void(base_family = "serif") +
+  facet_wrap(~ race, strip.position = "bottom") +
+  labs(title = "Population Change between 2010 and 2020 Census Counts",
+       caption = "School Board District Boundaries shown in black, Wards in white.",
+       fill = "") +
+  theme(strip.text = element_text(size = 12),
+        plot.caption = element_text(hjust = 0))
+
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE, clean=TRUE)
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
