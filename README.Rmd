@@ -24,7 +24,7 @@ The purpose of this repository is to provide summary analysis of the 2020 Census
 
 ### Wards
 
-```{r citwide_ward_pop_change_w_sbd, out.width="100%"}
+```{r citwide_ward_pop_change_w_sbd}
 citywide <- ward_pop_comparison %>%
   as_tibble() %>%
   group_by(race) %>%
