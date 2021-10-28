@@ -206,15 +206,15 @@ ward_pop_comparison %>%
 
 walk(1:8, function(x) {
   plot(v_wards %>%
-      filter(!str_detect(variable, "Total") & school_board_district == x) %>%
-      group_by(ward, "18+" = str_detect(variable, "18\\+$")) %>%
-        mutate(variable = str_remove_all(variable, " 18\\+$")) %>%
-      filter(value == max(value)) %>%
-      ggplot() +
-      geom_sf(aes(fill = variable)) +
-      labs(title = paste0("SBD", x)) +
-        facet_wrap(~ `18+`) +
-      theme_void()
+        filter(!str_detect(variable, "Total") & school_board_district == x) %>%
+        group_by(ward, "18+" = str_detect(variable, "18\\+$")) %>%
+          mutate(variable = str_remove_all(variable, " 18\\+$")) %>%
+        filter(value == max(value)) %>%
+        ggplot() +
+        geom_sf(aes(fill = variable)) +
+        labs(title = paste0("SBD", x)) +
+          facet_wrap(~ `18+`) +
+        theme_void()
   )
 })
 
